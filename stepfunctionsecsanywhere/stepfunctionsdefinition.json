@@ -1,0 +1,140 @@
+{
+  "Comment": "A Hello World example demonstrating various state types of the Amazon States Language",
+  "StartAt": "Debug1",
+  "States": {
+    "Debug1": {
+      "Comment": "Passing input (EventBridge Event) to Output to assist in debugging.",
+      "Type": "Pass",
+      "Next": "Example Decision Logic"
+    },
+    "Example Decision Logic": {
+      "Comment": "Example Choice Rule Parsing Input",
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.detail.eventName",
+          "StringEquals": "CompleteMultipartUpload",
+          "Next": "Debug2"
+        },
+        {
+          "Variable": "$.detail.requestParameters.key",
+          "StringEquals": "fail.txt",
+          "Next": "No"
+        }
+      ],
+      "Default": "Debug2"
+    },
+    "Debug2": {
+      "Type": "Pass",
+      "Next": "ECS RunTask"
+    },
+    "ECS RunTask": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "EXTERNAL",
+        "Cluster": "arn:aws:ecs:eu-west-1:639959873566:cluster/ECS-Anywhere",
+        "TaskDefinition": "arn:aws:ecs:eu-west-1:639959873566:task-definition/ECSAnywhereTaskRunner:4",
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "EcsAnywhereTaskRunner",
+              "Command": [
+                "aws s3 ls $BUCKET_NAME && aws s3 cp $BUCKET_NAME/$OBJECT_KEY /opt/$OBJECT_KEY && ls -l /opt/$OBJECT_KEY"
+              ],
+              "Environment": [
+                {
+                  "Name": "BUCKET_NAME",
+                  "Value.$": "States.Format('s3://{}', $.detail.requestParameters.bucketName)"
+                },
+                {
+                  "Name": "OBJECT_KEY",
+                  "Value.$": "$.detail.requestParameters.key"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "Next": "Parallel",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "BackoffRate": 1,
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3
+        }
+      ],
+      "ResultPath": null
+    },
+    "Parallel": {
+      "Type": "Parallel",
+      "Next": "Debug3",
+      "Branches": [
+        {
+          "StartAt": "Calculate MD5 Checksum",
+          "States": {
+            "Calculate MD5 Checksum": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::ecs:runTask",
+              "Parameters": {
+                "LaunchType": "EXTERNAL",
+                "Cluster": "arn:aws:ecs:eu-west-1:639959873566:cluster/ECS-Anywhere",
+                "TaskDefinition": "arn:aws:ecs:eu-west-1:639959873566:task-definition/ECSAnywhereTaskRunner:4",
+                "Overrides": {
+                  "ContainerOverrides": [
+                    {
+                      "Name": "EcsAnywhereTaskRunner",
+                      "Command": [
+                        "aws s3 cp $BUCKET_NAME/$OBJECT_KEY /opt/$OBJECT_KEY && ls -l /opt/$OBJECT_KEY && md5sum /opt/$OBJECT_KEY"
+                      ],
+                      "Environment": [
+                        {
+                          "Name": "BUCKET_NAME",
+                          "Value.$": "States.Format('s3://{}', $.detail.requestParameters.bucketName)"
+                        },
+                        {
+                          "Name": "OBJECT_KEY",
+                          "Value.$": "$.detail.requestParameters.key"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Wait",
+          "States": {
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 5,
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Success",
+          "States": {
+            "Success": {
+              "Type": "Succeed"
+            }
+          }
+        }
+      ]
+    },
+    "No": {
+      "Type": "Fail",
+      "Cause": "Not Hello World"
+    },
+    "Debug3": {
+      "Type": "Pass",
+      "End": true
+    }
+  }
+}
